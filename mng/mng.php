@@ -13,6 +13,7 @@
 	define('MNG_UINT_ENDL', 0x454e444c);
 	define('MNG_UINT_TERM', 0x5445524d);
 	define('MNG_UINT_JHDR', 0x4a484452);
+	define('MNG_UINT_tEXt', 0x74455874);
 	
 	define('MNG_SIGNATURE', "\212MNG\r\n\032\n");
 	define('PNG_SIGNATURE', "\x89PNG\r\n\x1A\n");
@@ -33,47 +34,83 @@
 		public $IDAT = array();
 		
 		public $IEND = null;
+	
+		// @todo Might also need tRNS
+		
+		/** Attempts to construct an actual PNG file via stored chunk data */
+		public function write($filename)
+		{
+			$fp = fopen($filename, 'wb');
+			
+			if (!$fp)
+				throw new Exception('Could not open ' . $filename . ' for write');
+			
+			// Write PNG signature
+			fwrite($fp, PNG_SIGNATURE); // @todo length?
+			
+			// Write header
+			$this->write_chunk($fp, $this->IHDR['chunk']);
+			
+			// Write palette 
+			$this->write_chunk($fp, $this->PLTE['chunk']);
+			
+			// Write notes if we have any
+			if ($this->tEXt != null)
+			{
+				$this->write_chunk($fp, $this->tEXt);
+			}
+			
+			// Write IDAT chunks (@todo Make sure the "more than one" case is properly handled)
+			foreach ($this->IDAT as $IDAT)
+			{
+				$this->write_chunk($fp, $IDAT);
+			}
+			
+			// Write the footer
+			$this->write_chunk($fp, $this->IEND);
+			
+			fclose($fp);
+		}
+		
+		
+		/** Repacks a chunk to it's original binary state and writes to the file */
+		public function write_chunk($fp, $chunk)
+		{
+			// Write size/id header
+			fwrite($fp, pack('NN', $chunk['size'], $chunk['id']));
+		
+			// Write data stream if we have one
+			if ($chunk['size'] > 0)
+				fwrite($fp, $chunk['data'], $chunk['size']);
+			
+			// Write CRC footer
+			fwrite($fp, pack('N', $chunk['crc']));
+		}
+		
 	}
-	
-	$tmp = array();
-	$tmp['data'] = fread($fp, $byteCount);
-	
-	// spit it out
-	$stream = fopen('frame' . $index . '.png', 'wb');
-	fwrite($stream, );
-	fwrite($stream, $tmp['data']);
-	fclose($stream);
-	
-	if (!$tmp)
-	{
-		throw new Exception('Could not read frame');
-	}
-	
 	
 	class MNG_Image
 	{
 		private $size; // filesize in bytes
 	
-		private $MHDR = null; // MNG header chunk
-		private $FRAM = null; // MNG framing mode chunk
+		private $MHDR = null; // MNG header array
+		private $FRAM = null; // MNG framing mode array
 			
-		private $PLTE; // The actual palette chunk
+		private $PLTE = null; // MNG palette array
+
+		private $frames = array(); // Array of PNG_Object objects
+		private $currentPNG = null; // Created when we encounter an IHDR, and moved into frames at IEND
 	
-		// Decoded fields from the palette chunk
-		private $global_palette = null;
-		private $global_palette_size = 0;
-		private $trans = null;
-		private $num_trans = 0;
-		private $trans_values = null;
+		private $current_frame_key = '';
 	
 		public function load($filename)
 		{
 			$this->size = @filesize($filename);
 			
-			$fp = fopen($filename, 'rb');
+			$fp = @fopen($filename, 'rb');
 			if (!$fp)
 			{
-				throw new Exception('Could not open ' . $filename);
+				throw new Exception('Could not open ' . $filename . ' for read');
 			}
 			
 			if (!$this->read_signature($fp))
@@ -127,25 +164,79 @@
 			return $chunk;
 		}
 		
-		private function read_MHDR($fp)
+		private function read_MHDR($chunk)
 		{
-			$data = fread($fp, 8 * 4);
-		
 			$fmt = 	'Nframe_width/' .
 					'Nframe_height/' .
 					'Nticks_per_second/' .
 					'Nnominal_layer_count/' .
 					'Nnominal_frame_count/' .
 					'Nnominal_play_time/' .
-					'Nsimplicity_profile/' .
-					'Ncrc';
+					'Nsimplicity_profile/';
 		
-			$MHDR = unpack($fmt, $data);
+			$MHDR = unpack($fmt, $chunk['data']);
+			
+			print '<pre>MHDR:';
+			print_r($MHDR);
+			print '</pre>';
 			
 			return $MHDR;
 		}
 		
-		private function read_FRAM($fp)
+		private function read_PLTE($chunk)
+		{
+			$PLTE = array();
+			$PLTE['chunk'] = $chunk;
+			
+			if ($chunk['size'] % 3 != 0)
+			{
+				throw new Exception('MNG_UINT_PLTE Not divisible by 3');
+			}
+			
+			// Note that this was converted to a png_colorp object. 
+			// @todo I assume it unpacks into RGB channels, so this 
+			// needs to be translated 
+			$PLTE['global_palette'] = $chunk['data'];
+			
+			// Number of colors in the palette (3 bytes each)
+			$PLTE['global_palette_size'] = $chunk['size'] / 3;
+			
+			print '<pre>FRAM:';
+			print_r($PLTE);
+			print '</pre>';
+			
+			return $PLTE;
+		}
+		
+		private function read_tRNS($chunk)
+		{
+			/*
+				http://www.libpng.org/pub/png/spec/iso/index-object.html#11tRNS
+				Depending on color type, there's various formats possible.
+				To ease usage, support will focus on GIAM as the primary MNG generator. 
+				
+				I BELIEVE giam will produce the palette version all the time, since
+				it's lazy. (color_type == 3) So that one will be handled
+
+				color_type 3:
+					the tRNS chunk contains a series of one-byte alpha values,
+					corresponding to entries in the PLTE chunk.
+			*/
+			$tRNS = array();
+			$tRNS['chunk'] = $chunk;
+			
+			$tRNS['trans_values'] = null;
+			$tRNS['trans'] = $chunk['data'];
+			$tRNS['num_trans'] = $chunk['size'];
+			
+			print '<pre>tRNS:';
+			print_r($tRNS);
+			print '</pre>';
+			
+			return $tRNS;
+		}
+		
+		private function read_FRAM_old($fp)
 		{
 			$FRAM = array();
 			$bytesRead = 0;
@@ -197,6 +288,54 @@
 			return $FRAM;
 		}
 		
+		private function read_FRAM($chunk)
+		{
+			$FRAM = array();
+			$FRAM['chunk'] = $chunk;
+			
+			$fmt = 	'Cframing_mode/' .
+					'asubframe_name/' .
+					'Cchange_interframe_delay/' .
+					'Cchange_timeout_and_termination/' .
+					'Cchange_layer_clipping_boundaries/' .
+					'Cchange_sync_id_list/' . 
+					'Ninterframe_delay'; // @todo can't guarantee interframe_delay will exist!
+					
+			$tmp = unpack($fmt, $chunk['data']);
+			
+			$FRAM = array_merge($FRAM, $tmp);
+			
+			print '<pre>FRAM:';
+			print_r($FRAM);
+			print '</pre>';
+			
+			return $FRAM;
+		}
+		
+		private function read_IHDR($chunk)
+		{
+			$IHDR = array();
+			$IHDR['chunk'] = $chunk;
+			
+			$fmt =  'Nwidth/' .
+					'Nheight/' .
+					'Cbit_depth/' .
+					'Ccolor_type/' .
+					'Ccompression_method/' .
+					'Cfilter_method/' .
+					'Cinterlace_method';
+					
+			$tmp = unpack($fmt, $chunk['data']);
+			
+			$IHDR = array_merge($IHDR, $tmp);
+			
+			print '<pre>IHDR:';
+			print_r($IHDR);
+			print '</pre>';
+			
+			return $IHDR;
+		}
+		
 		private function iterate_chunks($fp)
 		{
 			$count = 0;
@@ -216,8 +355,8 @@
 					/*	Header and global properties */
 					case MNG_UINT_MHDR:
 						
-						fseek($fp, ($chunk['size'] + 4) * -1, SEEK_CUR);
-						$this->MHDR = $this->read_MHDR($fp);
+						//fseek($fp, ($chunk['size'] + 4) * -1, SEEK_CUR);
+						$this->MHDR = $this->read_MHDR($chunk);
 						
 						break;
 					
@@ -227,13 +366,13 @@
 					*/
 					case MNG_UINT_FRAM:
 						
-						fseek($fp, ($chunk['size'] + 4) * -1, SEEK_CUR);
+						//fseek($fp, ($chunk['size'] + 4) * -1, SEEK_CUR);
 						
 						// Store the current frame properties for later reference
-						$this->FRAM = $this->read_FRAM($fp);
+						$this->FRAM = $this->read_FRAM($chunk);
 						
 						// Seek forward again, skipping what we didn't read from FRAM
-						fseek($fp, $chunk['size'] + 4, SEEK_CUR);
+						//fseek($fp, $chunk['size'] + 4, SEEK_CUR);
 						
 						// @todo better way to handle this without seeking back/forward.
 						// I imagine there's some subtraction that can be done somewhere
@@ -246,40 +385,14 @@
 						
 						if (!$doneWithHeader)
 						{
-							if ($chunk['size'] % 3 != 0)
-							{
-								throw new Exception('MNG_UINT_PLTE Not divisible by 3');
-							}
-							
-							// Note that this was converted to a png_colorp object. 
-							// @todo I assume it unpacks into RGB channels, so this 
-							// needs to be translated 
-							$this->global_palette = $chunk['data'];
-							
-							// Number of colors in the palette (3 bytes each)
-							$this->global_palette_size = $chunk['size'] / 3;
+							$this->PLTE = $this->read_PLTE($chunk);
 						}
 						break;
 						
 					/*	Modify global transparency */
 					case MNG_UINT_tRNS:
-						 
-						/*
-							http://www.libpng.org/pub/png/spec/iso/index-object.html#11tRNS
-							Depending on color type, there's various formats possible.
-							To ease usage, support will focus on GIAM as the primary MNG generator. 
-							
-							I BELIEVE giam will produce the palette version all the time, since
-							it's lazy. (color_type == 3) So that one will be handled
 
-							color_type 3:
-								the tRNS chunk contains a series of one-byte alpha values,
-								corresponding to entries in the PLTE chunk.
-						*/
-						 
-						$this->trans_values = null;
-						$this->trans = $chunk['data'];
-						$this->num_trans = $chunk['size'];
+						$this->tRNS = $this->read_tRNS($chunk);
 						
 						break;
 						
@@ -290,15 +403,66 @@
 						$byteCount = $chunk['size'] + 12;
 						$IHDRPosition = $byteCount;
 						
+						// Start of a new PNG object
+						if ($this->currentPNG != null)
+						{
+							// Shouldn't happen. We should've copied it out at a preceeding IEND
+							throw new Exception('MNG_UINT_IHDR before an IEND');
+						}
+						
+						print '<i>Creating a new PNG object</i><br/>';
+						$this->currentPNG = new PNG_Object();
+						$this->currentPNG->IHDR = $this->read_IHDR($chunk);
+						
+						// Copy our current palette to the PNG
+						if ($this->PLTE == null)
+						{
+							throw new Exception('No PLTE before IHDR');
+						}
+						
+						$this->currentPNG->PLTE = $this->PLTE;
+						
 						break;
-					
+						
+					case MNG_UINT_IDAT:
+						
+						if ($this->currentPNG == null)
+							throw new Exception('MNG_UINT_IDAT with no working PNG');
+							
+						// Copy over to our current png
+						$this->currentPNG->IDAT[] = $chunk;
+						
+						break;
+						
+					case MNG_UINT_tEXt:
+						
+						if ($this->currentPNG == null)
+							throw new Exception('MNG_UINT_IEND with no working PNG');
+						
+						$this->currentPNG->tEXt = $chunk;
+						
+						// Change the global frame key based on the new key string
+						// @todo I could probably use something faster than unpack here
+						$tmp = unpack('a*', $chunk['data']);
+						$this->current_frame_key = $tmp[1];
+						
+						break;
+						
 					/*	Marks the end of a PNG chunk series */
 					case MNG_UINT_IEND:
+						
+						if ($this->currentPNG == null)
+							throw new Exception('MNG_UINT_IEND with no working PNG');
+							
+						$this->currentPNG->IEND = $chunk;
+		
+						// IEND marks the end of a PNG image (a frame), so do any post-processing
+						$this->finish_frame();
 						
 						// Seek to IHDR and read
 						
 						// If there were none encountered, then we are probably malformed
-						if ($IHDRPosition == 0)
+						/*if ($IHDRPosition == 0)
 						{
 							throw new Exception('Zero IHDR');
 						}
@@ -332,6 +496,7 @@
 						$frames[$index] = $tmp;
 						
 						$IHDRPosition = 0;
+						*/
 						
 						break;
 					
@@ -356,6 +521,38 @@
 					and global MNG properties are within $this.
 			*/
 			
+		}
+		
+		/** Called when we have fully populated $this->currentPNG with chunks from this MNG */
+		private function finish_frame()
+		{
+			// Debugging to ensure we have everything
+			print '<pre>PNG_Object:';
+			print_r($this->currentPNG);
+			print '</pre>';
+			
+			// For testing purposes, write the PNG itself to a file using the current chunks,
+			// along with generating some additional metadata for examination purposes
+			
+			
+			
+			$filename = 'output/' . count($this->frames)
+						. '-' . strval($this->FRAM['interframe_delay'])
+						. '-' . $this->current_frame_key
+						. '.png';
+						
+			$this->currentPNG->write($filename);
+			
+			
+			/*
+				Better logic would be to copy things like the key/delay/etc
+				to the PNG object, and then after we finished reading the MNG,
+				we would process frames and save to file or manipulate, etc 
+			*/
+			
+			// Copy the current PNG into our frames array, since we're finished with it
+			$this->frames[] = $this->currentPNG;
+			$this->currentPNG = null;
 		}
 		
 		private function read_frame($fp)
@@ -452,7 +649,7 @@
 			// Undo
 			fseek($fp, -(8 + 4 * 2 + 5), SEEK_CUR);
 			
-			print '<pre>';
+			print '<pre>IHDR:';
 			print_r($tmp);
 			print '</pre>';
 			
@@ -479,6 +676,6 @@
 	};
 	
 	$mng = new MNG_Image();
-	$mng->load('test_1.mng');
+	$mng->load('tests/test_1.mng');
 	
 ?>
