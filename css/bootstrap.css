@@ -931,7 +931,6 @@ input[type="checkbox"]:focus {
   -webkit-box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.025);
   -moz-box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.025);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.025);
-  cursor: not-allowed;
 }
 .uneditable-input {
   overflow: hidden;
@@ -4684,14 +4683,14 @@ a.badge:hover {
 }
 .progress-info .bar,
 .progress .bar-info {
-  background-color: #4bb1cf;
-  background-image: -moz-linear-gradient(top, #7961AC, #339bb9);
-  background-image: -webkit-gradient(linear, 0 0, 0 100%, from(#7961AC), to(#339bb9));
-  background-image: -webkit-linear-gradient(top, #7961AC, #339bb9);
-  background-image: -o-linear-gradient(top, #7961AC, #339bb9);
-  background-image: linear-gradient(to bottom, #7961AC, #339bb9);
+  background-color: #7961AC;
+  background-image: -moz-linear-gradient(top, #7961AC, #6249B1);
+  background-image: -webkit-gradient(linear, 0 0, 0 100%, from(#7961AC), to(#6249B1));
+  background-image: -webkit-linear-gradient(top, #7961AC, #6249B1);
+  background-image: -o-linear-gradient(top, #7961AC, #6249B1);
+  background-image: linear-gradient(to bottom, #7961AC, #6249B1);
   background-repeat: repeat-x;
-  filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#ff7961AC', endColorstr='#ff339bb9', GradientType=0);
+  filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#ff7961AC', endColorstr='#ff6249B1', GradientType=0);
 }
 .progress-info.progress-striped .bar,
 .progress-striped .bar-info {
@@ -5525,7 +5524,7 @@ textarea[disabled],
 input[readonly],
 select[readonly],
 textarea[readonly] {
-  color: #bbbfc2;
+  color: #757C82;
 }
 .form-actions {
   border-top: none;
@@ -5553,7 +5552,7 @@ textarea[readonly] {
 }
 .label,
 .alert {
-  color: rgba(255, 255, 255, 0.9);
+  color: #ffffff;
   text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.3);
   -webkit-box-shadow: 1px 1px 1px rgba(0, 0, 0, 0.3);
   -moz-box-shadow: 1px 1px 1px rgba(0, 0, 0, 0.3);
