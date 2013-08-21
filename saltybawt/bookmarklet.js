@@ -1,0 +1,1 @@
+javascript: (function(){function getScript(url){var script=document.createElement('script');script.src=url;var head=document.getElementsByTagName('head')[0],done=false;head.appendChild(script);} getScript('http://localhost/saltybawt/saltybawt.js?_='+(new Date().getTime()));})();
